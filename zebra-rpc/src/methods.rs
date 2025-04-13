@@ -8,7 +8,7 @@
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 use std::collections::HashMap;
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{collections::HashSet, fmt::Debug, io::Cursor, sync::Arc};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
@@ -45,6 +45,8 @@ use zebra_node_services::mempool;
 use zebra_state::{
     HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
 };
+
+use zcash_history::{Version, V1, V2};
 
 use crate::{
     methods::trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
@@ -345,6 +347,25 @@ pub trait Rpc {
         &self,
         address_strings: AddressStrings,
     ) -> Result<Vec<GetAddressUtxos>>;
+
+    /// Returns the node of the history tree for the given network upgrade at the specified index.
+    ///
+    /// method: post
+    /// tags: address
+    ///
+    /// # Parameters
+    ///
+    /// - `upgrade`: (string, required, default="nu6") The network upgrade of the node. Must be one of "heartwood", "canopy", "nu5" or "nu6".
+    /// - `index`: (numeric, required) The index of the node in the array representation of the MMR tree.
+    /// - `verbose`: (number, optional, default=1, example=1) If 0, return a string of hex-encoded data, otherwise return a JSON object.
+    ///
+    #[method(name = "gethistorynode")]
+    async fn get_history_node(
+        &self,
+        upgrade: String,
+        index: u32,
+        verbose: Option<u8>,
+    ) -> Result<GetHistoryNode>;
 
     /// Stop the running zebrad process.
     ///
@@ -1587,6 +1608,147 @@ where
         Ok(response_utxos)
     }
 
+    async fn get_history_node(
+        &self,
+        upgrade: String,
+        index: u32,
+        verbose: Option<u8>,
+    ) -> Result<GetHistoryNode> {
+        const UPGRADE_LIST: &[(&str, NetworkUpgrade)] = &[
+            ("heartwood", NetworkUpgrade::Heartwood),
+            ("canopy", NetworkUpgrade::Canopy),
+            ("nu5", NetworkUpgrade::Nu5),
+            ("nu6", NetworkUpgrade::Nu6),
+        ];
+
+        let network = self.network.clone();
+        let state = self.state.clone();
+        let verbose = verbose.unwrap_or(1);
+
+        // Fail if history trees are not active yet.
+        let Some(_) = NetworkUpgrade::Heartwood.activation_height(&network) else {
+            return Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "Heartwood activation height was not reached yet.",
+                None::<()>,
+            ));
+        };
+
+        let network_upgrade = UPGRADE_LIST
+            .iter()
+            .find(|&&(name, _)| name == upgrade.as_str())
+            .map(|&(_, upgrade)| upgrade)
+            .ok_or_else(|| {
+                ErrorObject::owned(
+                    server::error::LegacyCode::Misc.into(),
+                    format!(
+                        "invalid network upgrade, must be one of: {:?}",
+                        UPGRADE_LIST.iter().map(|(s, _)| *s).collect::<Vec<_>>()
+                    )
+                    .as_str(),
+                    None::<()>,
+                )
+            })?;
+
+        let branch_id = network_upgrade.branch_id().unwrap();
+
+        let zebra_state::ReadResponse::HistoryNode(entry) = state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::HistoryNode(
+                network_upgrade,
+                index,
+            ))
+            .await
+            .map_misc_error()?
+        else {
+            panic!("unexpected response to HistoryNode request")
+        };
+
+        if let Some(entry) = entry {
+            let response = if verbose == 0 {
+                GetHistoryNode::Raw(HexData(entry.inner().to_vec()))
+            } else {
+                let response_object = match network_upgrade {
+                    NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
+                        let entry_object =
+                            zcash_history::Entry::<V1>::from_bytes(branch_id.into(), entry.inner())
+                                .expect("entry object should be valid");
+                        let node_bytes = match entry_object.leaf() {
+                            true => entry.inner().split_at(1).1,
+                            false => entry.inner().split_at(9).1,
+                        };
+                        let mut cursor = Cursor::new(&node_bytes);
+                        let node = V1::read(branch_id.into(), &mut cursor)
+                            .expect("node data should be valid");
+                        let mut total_work: [u8; 32] = bytemuck::cast(node.subtree_total_work.0);
+                        total_work.reverse();
+                        GetHistoryNodeObject {
+                            subtree_commitment: node.subtree_commitment,
+                            consensus_branch_id: ConsensusBranchIdHex(
+                                node.consensus_branch_id.into(),
+                            ),
+                            start_time: node.start_time,
+                            end_time: node.end_time,
+                            start_target: node.start_target,
+                            end_target: node.end_target,
+                            start_sapling_root: node.start_sapling_root,
+                            end_sapling_root: node.end_sapling_root,
+                            subtree_total_work: total_work,
+                            start_height: node.start_height,
+                            end_height: node.end_height,
+                            sapling_tx: node.sapling_tx,
+                            start_orchard_root: [0; 32],
+                            end_orchard_root: [0; 32],
+                            orchard_tx: 0,
+                        }
+                    }
+                    _ => {
+                        let entry_object =
+                            zcash_history::Entry::<V2>::from_bytes(branch_id.into(), entry.inner())
+                                .expect("entry object should be valid");
+                        let node_bytes = match entry_object.leaf() {
+                            true => entry.inner().split_at(1).1,
+                            false => entry.inner().split_at(9).1,
+                        };
+                        let mut cursor = Cursor::new(&node_bytes);
+                        let node = V2::read(branch_id.into(), &mut cursor)
+                            .expect("node data should be valid");
+                        let mut total_work: [u8; 32] = bytemuck::cast(node.v1.subtree_total_work.0);
+                        total_work.reverse();
+                        GetHistoryNodeObject {
+                            consensus_branch_id: ConsensusBranchIdHex(
+                                node.v1.consensus_branch_id.into(),
+                            ),
+                            subtree_commitment: node.v1.subtree_commitment,
+                            start_time: node.v1.start_time,
+                            end_time: node.v1.end_time,
+                            start_target: node.v1.start_target,
+                            end_target: node.v1.end_target,
+                            start_sapling_root: node.v1.start_sapling_root,
+                            end_sapling_root: node.v1.end_sapling_root,
+                            subtree_total_work: total_work,
+                            start_height: node.v1.start_height,
+                            end_height: node.v1.end_height,
+                            sapling_tx: node.v1.sapling_tx,
+                            start_orchard_root: node.start_orchard_root,
+                            end_orchard_root: node.end_orchard_root,
+                            orchard_tx: node.orchard_tx,
+                        }
+                    }
+                };
+                GetHistoryNode::Object(Box::new(response_object))
+            };
+
+            Ok(response)
+        } else {
+            Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "The requested history node was not found.",
+                None::<()>,
+            ))
+        }
+    }
+
     fn stop(&self) -> Result<String> {
         #[cfg(not(target_os = "windows"))]
         if self.network.is_regtest() {
@@ -2660,6 +2822,90 @@ pub struct OrchardTrees {
 impl OrchardTrees {
     fn is_empty(&self) -> bool {
         self.size == 0
+    }
+}
+
+/// Response to a `gethistorynode` RPC request.
+///
+/// See the notes for the [`RpcServer::get_history_node`] method.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(untagged)]
+pub enum GetHistoryNode {
+    /// The requested history node, as hex-encoded data.
+    Raw(hex_data::HexData),
+
+    /// The history node object.
+    Object(Box<GetHistoryNodeObject>),
+}
+
+/// Verbose response to a `gethistorynode` RPC request.
+///
+/// See the notes for the [`RpcServer::get_history_node`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetHistoryNodeObject {
+    /// Consensus branch id, should be provided by deserializing node.
+    pub consensus_branch_id: ConsensusBranchIdHex,
+    /// Subtree commitment - either block hash for leaves or hashsum of children for nodes.
+    #[serde(with = "hex")]
+    pub subtree_commitment: [u8; 32],
+    /// Start time.
+    pub start_time: u32,
+    /// End time.
+    pub end_time: u32,
+    /// Start target.
+    pub start_target: u32,
+    /// End target.
+    pub end_target: u32,
+    /// Start sapling tree root.
+    #[serde(with = "hex")]
+    pub start_sapling_root: [u8; 32],
+    /// End sapling tree root.
+    #[serde(with = "hex")]
+    pub end_sapling_root: [u8; 32],
+    /// Part of tree total work.
+    #[serde(with = "hex")]
+    pub subtree_total_work: [u8; 32],
+    /// Start height.
+    pub start_height: u64,
+    /// End height
+    pub end_height: u64,
+    /// Number of Sapling transactions.
+    pub sapling_tx: u64,
+    /// Start Orchard tree root.
+    #[serde(with = "hex")]
+    pub start_orchard_root: [u8; 32],
+    /// End Orchard tree root.
+    #[serde(with = "hex")]
+    pub end_orchard_root: [u8; 32],
+    /// Number of Orchard transactions.
+    pub orchard_tx: u64,
+}
+
+impl Default for GetHistoryNode {
+    fn default() -> Self {
+        GetHistoryNode::Object(Box::default())
+    }
+}
+
+impl Default for GetHistoryNodeObject {
+    fn default() -> Self {
+        GetHistoryNodeObject {
+            subtree_commitment: [0; 32],
+            consensus_branch_id: ConsensusBranchIdHex(ConsensusBranchId::default()),
+            start_time: 0,
+            end_time: 0,
+            start_target: 0,
+            end_target: 0,
+            start_sapling_root: [0; 32],
+            end_sapling_root: [0; 32],
+            subtree_total_work: [0; 32],
+            start_height: 0,
+            end_height: 0,
+            sapling_tx: 0,
+            start_orchard_root: [0; 32],
+            end_orchard_root: [0; 32],
+            orchard_tx: 0,
+        }
     }
 }
 

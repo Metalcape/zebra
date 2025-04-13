@@ -95,6 +95,10 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 # ECC deps used by getblocktemplate-rpcs feature
 zcash_address = { workspace = true, optional = true}
 
+# ECC deps for gethistorynode rpc
+zcash_history.workspace = true
+bytemuck = {version = "1.22", features = ["derive"] }
+
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 

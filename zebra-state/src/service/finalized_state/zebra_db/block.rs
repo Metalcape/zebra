@@ -443,17 +443,24 @@ impl ZebraDb {
         )?;
 
         if let Some(history_nodes) = history_nodes {
-            let prev_node_count = finalized
-                .treestate
-                .history_tree
-                .node_count_at(finalized.height.previous()?)
-                .unwrap();
-            for (i, node) in history_nodes.iter().enumerate() {
-                let index = HistoryNodeIndex {
-                    index: i as u32 + prev_node_count,
-                    upgrade: NetworkUpgrade::current(network, finalized.height),
-                };
-                batch.write_history_node(self, index, node.clone());
+            let network_upgrade = NetworkUpgrade::current(network, finalized.height);
+            // History nodes are only valid if we are at least past heartwood activation.
+            if let Some(heartwood_height) = NetworkUpgrade::Heartwood.activation_height(network) {
+                if heartwood_height <= finalized.height {
+                    let prev_node_count = finalized
+                        .treestate
+                        .history_tree
+                        .node_count_at(finalized.height.previous()?)
+                        .unwrap();
+                    for (i, node) in history_nodes.iter().enumerate() {
+                        let index = HistoryNodeIndex {
+                            index: i as u32 + prev_node_count,
+                            upgrade: network_upgrade,
+                        };
+
+                        batch.write_history_node(self, index, node.clone());
+                    }
+                }
             }
         }
 
