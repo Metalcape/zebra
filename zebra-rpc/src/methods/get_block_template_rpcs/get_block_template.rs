@@ -275,7 +275,7 @@ pub fn generate_coinbase_and_roots(
     block_template_height: Height,
     miner_address: &transparent::Address,
     mempool_txs: &[VerifiedUnminedTx],
-    history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
+    chain_history_root: Option<ChainHistoryMmrRootHash>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
 ) -> (TransactionTemplate<NegativeOrZero>, DefaultRoots) {
@@ -293,8 +293,7 @@ pub fn generate_coinbase_and_roots(
     // Calculate block default roots
     //
     // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-    let chain_history_root = history_tree
-        .hash()
+    let chain_history_root = chain_history_root
         .or_else(|| {
             (NetworkUpgrade::Heartwood.activation_height(network) == Some(block_template_height))
                 .then_some([0; 32].into())
@@ -394,24 +393,34 @@ fn combine_coinbase_outputs(
     miner_reward: Amount<NonNegative>,
     like_zcashd: bool,
 ) -> Vec<(Amount<NonNegative>, transparent::Script)> {
-    // Combine all the funding streams with the miner reward.
-    let mut coinbase_outputs: Vec<(Amount<NonNegative>, &transparent::Address)> = funding_streams
-        .into_iter()
-        .map(|(_receiver, (amount, address))| (amount, address))
-        .collect();
-    coinbase_outputs.push((miner_reward, miner_address));
+    // Collect all the funding streams and convert them to outputs.
+    let funding_streams_outputs: Vec<(Amount<NonNegative>, &transparent::Address)> =
+        funding_streams
+            .into_iter()
+            .map(|(_receiver, (amount, address))| (amount, address))
+            .collect();
 
-    let mut coinbase_outputs: Vec<(Amount<NonNegative>, transparent::Script)> = coinbase_outputs
-        .iter()
-        .map(|(amount, address)| (*amount, address.create_script_from_address()))
-        .collect();
+    let mut coinbase_outputs: Vec<(Amount<NonNegative>, transparent::Script)> =
+        funding_streams_outputs
+            .iter()
+            .map(|(amount, address)| (*amount, address.create_script_from_address()))
+            .collect();
 
     // The HashMap returns funding streams in an arbitrary order,
     // but Zebra's snapshot tests expect the same order every time.
     if like_zcashd {
         // zcashd sorts outputs in serialized data order, excluding the length field
         coinbase_outputs.sort_by_key(|(_amount, script)| script.clone());
+
+        // The miner reward is always the first output independent of the sort order
+        coinbase_outputs.insert(
+            0,
+            (miner_reward, miner_address.create_script_from_address()),
+        );
     } else {
+        // Unlike zcashd, in Zebra the miner reward is part of the sorting
+        coinbase_outputs.push((miner_reward, miner_address.create_script_from_address()));
+
         // Zebra sorts by amount then script.
         //
         // Since the sort is stable, equal amounts will remain sorted by script.

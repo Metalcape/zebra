@@ -225,6 +225,11 @@ impl ZebraDb {
             .map(|(index, _)| index)
     }
 
+    /// Returns the last history node.
+    pub fn last_history_node(&self) -> Option<Entry> {
+        self.history_node_cf().zs_last_key_value().map(|(_, entry)| entry)
+    }
+
     // Value pool methods
 
     /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
