@@ -591,20 +591,6 @@ name = "bytemuck"
 version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9134a6ef01ce4b366b50689c94f82c14bc72bc5d0386829828a2e2752ef7958c"
-dependencies = [
- "bytemuck_derive",
-]
-
-[[package]]
-name = "bytemuck_derive"
-version = "1.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ecc273b49b3205b83d648f0690daa588925572cc5063745bfe547fe7ec8e1a1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
 
 [[package]]
 name = "byteorder"
@@ -5032,7 +5018,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch-control"
-version = "0.2.41-beta.21"
+version = "0.2.41-beta.22"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -5055,7 +5041,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.41-beta.21"
+version = "0.2.41-beta.22"
 dependencies = [
  "futures-core",
  "pin-project",
@@ -6243,7 +6229,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 dependencies = [
  "bitflags 2.9.0",
  "bitflags-serde-legacy",
@@ -6309,7 +6295,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6355,7 +6341,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-grpc"
-version = "0.1.0-alpha.12"
+version = "0.1.0-alpha.13"
 dependencies = [
  "color-eyre",
  "futures-util",
@@ -6377,7 +6363,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 dependencies = [
  "bitflags 2.9.0",
  "byteorder",
@@ -6418,7 +6404,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 dependencies = [
  "color-eyre",
  "jsonrpsee-types",
@@ -6431,7 +6417,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 dependencies = [
  "base64 0.22.1",
  "bytemuck",
@@ -6453,6 +6439,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "serde_with",
  "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
@@ -6476,7 +6463,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-scan"
-version = "0.1.0-alpha.14"
+version = "0.1.0-alpha.15"
 dependencies = [
  "bls12_381",
  "chrono",
@@ -6524,7 +6511,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 dependencies = [
  "hex",
  "lazy_static",
@@ -6536,7 +6523,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 dependencies = [
  "bincode",
  "chrono",
@@ -6582,7 +6569,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 dependencies = [
  "color-eyre",
  "futures",
@@ -6610,7 +6597,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 dependencies = [
  "color-eyre",
  "hex",
@@ -6641,7 +6628,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "abscissa_core",
  "atty",
