@@ -9,8 +9,8 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
+    io::Cursor,
     ops::RangeInclusive,
-    io::Cursor
 };
 
 use chrono::Utc;

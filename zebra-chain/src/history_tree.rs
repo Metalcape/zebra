@@ -503,15 +503,15 @@ impl HistoryTree {
         Some(self.0.as_ref()?.hash())
     }
 
-    /// Return the index of the leaf node of this tree corresponding to the given block height.
+    /// Return the index of the leaf node of this tree corresponding to the given block height,
+    /// or `None` if the height is less than the activation height of this tree.
     pub fn leaf_index_of_block(&self, height: Height) -> Option<u32> {
         let diff = height
             - self
                 .0
                 .as_ref()?
                 .network_upgrade
-                .activation_height(&self.0.as_ref()?.network)?
-            + 1;
+                .activation_height(&self.0.as_ref()?.network)?;
         if diff < 0 {
             None
         } else {
@@ -520,10 +520,12 @@ impl HistoryTree {
     }
 
     /// Calculate the peak indexes of the tree when the last appended block is at the given height.
+    ///
+    /// Returns `None` if the height is less than the activation height of this tree.
     pub fn peaks_at(&self, height: Height) -> Option<Vec<u32>> {
-        let leaf_index = self.leaf_index_of_block(height)?;
+        let leaf_count = 1 + self.leaf_index_of_block(height)?;
 
-        // If bit h of leaf_index is set, there is a peak at height h.
+        // If bit h of leaf_count is set, there is a peak at height h.
         // Each peak at height h has 2^h leaves and 2^(h+1) - 1 nodes.
         // Each peak index equals the index of the previous peak plus
         // the number of nodes in the current peak - 1.
@@ -531,7 +533,7 @@ impl HistoryTree {
         let mut total_nodes = 0;
         for h in (0..31).rev() {
             let mask = 1 << h;
-            if leaf_index & mask != 0 {
+            if leaf_count & mask != 0 {
                 total_nodes += u32::pow(2, h + 1) - 1;
                 peaks.push(total_nodes - 1);
             }
@@ -541,6 +543,8 @@ impl HistoryTree {
     }
 
     /// Return the number of nodes in the tree at the given block height.
+    ///
+    /// Returns `None` if the height is less than the activation height of this tree.
     pub fn node_count_at(&self, height: Height) -> Option<u32> {
         self.peaks_at(height)
             .map(|peaks| match peaks.iter().last() {
@@ -549,9 +553,8 @@ impl HistoryTree {
             })
     }
 
-    /// Return the index of the MMR node of this tree corresponding to the given block height.
-    ///
-    /// Because MMR trees are append-only, this index is preserved after appending new blocks.
+    /// Return the index of the MMR node of this tree corresponding to the given block height,
+    /// or `None` if the height is less than the activation height of this tree.
     pub fn node_index_of_block(&self, height: Height) -> Option<u32> {
         self.node_count_at(height).map(|count| count - 1)
     }

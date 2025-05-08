@@ -8,7 +8,7 @@ use std::{
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
-    block::{self, Block, HeightDiff, Height},
+    block::{self, Block, Height, HeightDiff},
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,

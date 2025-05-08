@@ -172,12 +172,14 @@ impl ZebraDb {
         let temp_tree =
             HistoryTree::from_block(&network, block, &sapling_root, &orchard_root).ok()?;
 
-        // Get tree.peaks_at from height
-        let peak_idx = temp_tree.peaks_at(height)?;
+        // Get the peaks at the last block height covered by the tree,
+        // which is that of the previous block. If this is the activation
+        // block, the history tree is empty and this will return None.
+        let peak_ids = temp_tree.peaks_at((height - 1)?)?;
 
-        // Read the peaks and build the tree
+        // Read the peaks and build the inner tree
         let mut peaks = BTreeMap::<u32, Entry>::new();
-        for i in peak_idx {
+        for i in peak_ids {
             let index = HistoryNodeIndex { upgrade, index: i };
             peaks.insert(i, self.history_node(index)?);
         }
@@ -189,7 +191,7 @@ impl ZebraDb {
             height,
         );
 
-        // Return the tree
+        // Return the outer tree
         match inner_tree {
             Ok(tree) => Some(Arc::new(HistoryTree::from(tree))),
             Err(_) => None,
@@ -227,7 +229,9 @@ impl ZebraDb {
 
     /// Returns the last history node.
     pub fn last_history_node(&self) -> Option<Entry> {
-        self.history_node_cf().zs_last_key_value().map(|(_, entry)| entry)
+        self.history_node_cf()
+            .zs_last_key_value()
+            .map(|(_, entry)| entry)
     }
 
     // Value pool methods
