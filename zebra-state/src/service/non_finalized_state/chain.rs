@@ -1167,7 +1167,7 @@ impl Chain {
     }
 
     /// Returns the history tree node at the given index.
-    /// 
+    ///
     /// Returns `None` if the chain network upgrade does not match the given one, if there is no history tree associated with the chain, or if the requested index does not exist.
     pub fn history_node(&self, upgrade: NetworkUpgrade, index: u32) -> Option<Entry> {
         if upgrade != NetworkUpgrade::current(&self.network(), self.non_finalized_tip_height()) {
@@ -1200,7 +1200,7 @@ impl Chain {
     }
 
     /// Returns all the history nodes added by this chain, up to the tip block.
-    /// 
+    ///
     /// Returns `None` if the chain has no history nodes.
     fn history_nodes_at_chain_tip(&self) -> Option<Vec<Entry>> {
         let mut result = Vec::<Entry>::new();
