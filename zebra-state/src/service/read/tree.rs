@@ -243,6 +243,6 @@ where
     C: AsRef<Chain>,
 {
     chain
-        .and_then(|chain| chain.as_ref().history_node(upgrade, index).cloned())
+        .and_then(|chain| chain.as_ref().history_node(upgrade, index))
         .or_else(|| db.history_node(HistoryNodeIndex { upgrade, index }))
 }

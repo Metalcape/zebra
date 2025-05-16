@@ -456,14 +456,14 @@ impl HistoryTree {
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
-    ) -> Result<Vec<Entry>, HistoryTreeError> {
+    ) -> Result<Option<Vec<Entry>>, HistoryTreeError> {
         let Some(heartwood_height) = NetworkUpgrade::Heartwood.activation_height(network) else {
             assert!(
                 self.0.is_none(),
                 "history tree must not exist pre-Heartwood"
             );
 
-            return Ok(Vec::new());
+            return Ok(None);
         };
 
         let new_entries: Vec<Entry> = match block
@@ -495,7 +495,7 @@ impl HistoryTree {
                 .expect("history tree must exist Heartwood-onward")
                 .push(block.clone(), sapling_root, orchard_root)?,
         };
-        Ok(new_entries)
+        Ok(Some(new_entries))
     }
 
     /// Return the hash of the tree root if the tree is not empty.

@@ -21,6 +21,8 @@ use zebra_chain::{
     block::Height,
     orchard,
     parallel::tree::NoteCommitmentTrees,
+    parameters::NetworkUpgrade,
+    primitives::zcash_history::HistoryNodeIndex,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::Transaction,
@@ -553,6 +555,7 @@ impl DiskWriteBatch {
                 Treestate {
                     note_commitment_trees,
                     history_tree,
+                    new_history_nodes,
                 },
             ..
         } = finalized;
@@ -594,6 +597,30 @@ impl DiskWriteBatch {
         }
 
         self.update_history_tree(zebra_db, history_tree);
+
+        // Store the new history nodes, if they exist
+        if let Some(history_nodes) = new_history_nodes {
+            let network = zebra_db.network();
+            let network_upgrade = NetworkUpgrade::current(&network, finalized.height);
+            // History nodes are only valid if we are at least past heartwood activation.
+            if let Some(heartwood_height) = NetworkUpgrade::Heartwood.activation_height(&network) {
+                if heartwood_height < finalized.height {
+                    let prev_node_count = finalized
+                        .treestate
+                        .history_tree
+                        .node_count_at(finalized.height.previous()?)
+                        .unwrap();
+                    for (i, node) in history_nodes.iter().enumerate() {
+                        let index = HistoryNodeIndex {
+                            index: i as u32 + prev_node_count,
+                            upgrade: network_upgrade,
+                        };
+
+                        self.write_history_node(zebra_db, index, node.clone());
+                    }
+                }
+            }
+        }
 
         Ok(())
     }

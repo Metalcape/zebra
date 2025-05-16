@@ -135,7 +135,6 @@ impl DiskFormatUpgrade for AddSubtrees {
     #[allow(clippy::unwrap_in_result)]
     fn validate(
         &self,
-        _: Option<Height>,
         db: &ZebraDb,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {

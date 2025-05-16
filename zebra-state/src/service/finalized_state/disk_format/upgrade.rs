@@ -58,7 +58,6 @@ pub trait DiskFormatUpgrade {
     /// The inner `Result` indicates whether the validation itself failed or not.
     fn validate(
         &self,
-        _initial_tip_height: Option<Height>,
         _db: &ZebraDb,
         _cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {
@@ -472,13 +471,12 @@ impl DbFormatChange {
         //   (unless a future upgrade breaks these format checks)
         // - re-opening the current version should be valid, regardless of whether the upgrade
         //   or new block code created the format (or any combination).
-        Self::format_validity_checks_detailed(db, initial_tip_height, cancel_receiver)?
-            .unwrap_or_else(|_| {
-                panic!(
-                    "unexpected invalid database format: delete and re-sync the database at '{:?}'",
-                    db.path()
-                )
-            });
+        Self::format_validity_checks_detailed(db, cancel_receiver)?.unwrap_or_else(|_| {
+            panic!(
+                "unexpected invalid database format: delete and re-sync the database at '{:?}'",
+                db.path()
+            )
+        });
 
         let inital_disk_version = self
             .initial_disk_version()
@@ -551,7 +549,7 @@ impl DbFormatChange {
 
                 // Before marking the state as upgraded, check that the upgrade completed successfully.
                 upgrade
-                    .validate(Some(initial_tip_height), db, cancel_receiver)?
+                    .validate(db, cancel_receiver)?
                     .expect("db should be valid after upgrade");
 
                 timer.finish(module_path!(), line!(), upgrade.description());
@@ -602,7 +600,6 @@ impl DbFormatChange {
     #[allow(clippy::vec_init_then_push)]
     pub fn format_validity_checks_detailed(
         db: &ZebraDb,
-        initial_tip_height: Option<Height>,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {
         let timer = CodeTimer::start();
@@ -614,7 +611,7 @@ impl DbFormatChange {
         results.push(Self::format_validity_checks_quick(db));
 
         for upgrade in format_upgrades(None) {
-            results.push(upgrade.validate(initial_tip_height, db, cancel_receiver)?);
+            results.push(upgrade.validate(db, cancel_receiver)?);
         }
 
         // The work is done in the functions we just called.

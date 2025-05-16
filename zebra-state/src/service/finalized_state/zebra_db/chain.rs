@@ -16,7 +16,6 @@ use std::{
     sync::Arc,
 };
 
-use semver::Version;
 use zebra_chain::{
     amount::NonNegative,
     block::Height,
@@ -57,8 +56,15 @@ pub type LegacyHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, Height, HistoryT
 /// This type should not be used in new code.
 pub type RawHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, RawBytes, HistoryTreeParts>;
 
+/// The name of the history node column family.
+///
+/// This constant should be used so the compiler can detect typos.
 pub const HISTORY_NODE: &str = "history_node";
 
+/// The type for reading history nodes from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
 pub type HistoryNodeCf<'cf> = TypedColumnFamily<'cf, HistoryNodeIndex, Entry>;
 
 /// The name of the chain value pools column family.
@@ -267,91 +273,7 @@ impl DiskWriteBatch {
     pub fn write_history_node(&mut self, db: &ZebraDb, index: HistoryNodeIndex, node: Entry) {
         let history_node_cf = db.history_node_cf().with_batch_for_writing(self);
 
-        // Check if the key already exists
-        if let Some(existing_node) = db.history_node_cf().zs_get(&index) {
-            if existing_node == node {
-                warn!(
-                    "Overwriting history node at index {}! This should NOT happen unless when correcting a previous upgrade bug.",
-                    index.index
-                );
-            }
-        }
-
         let _ = history_node_cf.zs_insert(&index, &node);
-    }
-
-    /// Appends a list of history nodes to the history node column family.
-    ///
-    /// Panics if the provided network upgrade is not equal or immediately after
-    /// the last history node's network upgrade.
-    ///
-    /// Does nothing if the database version on disk does not support
-    /// history nodes yet.
-    ///
-    /// The batch must be written to the database by the caller.
-    pub fn append_history_nodes(
-        &mut self,
-        db: &ZebraDb,
-        nodes: Vec<Entry>,
-        network_upgrade: NetworkUpgrade,
-    ) {
-        let format_version = db
-            .format_version_on_disk()
-            .expect("unable to read database version from file");
-        if let Some(version) = format_version {
-            if version
-                < Version::parse("26.1.0").expect("hard-coded version string should be valid.")
-            {
-                warn!("History node append skipped because the database has not been upgraded yet");
-                return;
-            }
-        }
-
-        let next_index = db
-            .last_history_node_index()
-            .map(|index| {
-                if index.upgrade == network_upgrade {
-                    HistoryNodeIndex {
-                        upgrade: index.upgrade,
-                        index: index.index + 1,
-                    }
-                } else {
-                    let next_upgrade = NetworkUpgrade::next_upgrade(index.upgrade);
-                    // We must not skip network upgrades
-                    assert!(next_upgrade == Some(network_upgrade));
-                    info!(
-                        "Advancing history node network upgrade from {:?} to {:?}",
-                        index.upgrade, next_upgrade
-                    );
-                    HistoryNodeIndex {
-                        upgrade: next_upgrade.unwrap(),
-                        index: 0,
-                    }
-                }
-            })
-            .unwrap_or_else(|| HistoryNodeIndex {
-                upgrade: NetworkUpgrade::Heartwood,
-                index: 0,
-            });
-
-        if next_index.upgrade != network_upgrade {
-            panic!(
-                "Expected next network upgrade to be {:?}, but got {:?}",
-                next_index.upgrade, network_upgrade
-            );
-        }
-
-        for (i, node) in nodes.iter().enumerate() {
-            let index = HistoryNodeIndex {
-                upgrade: next_index.upgrade,
-                index: next_index.index + i as u32,
-            };
-            info!(
-                "Writing history node for {:?} at index {:?}",
-                index.upgrade, index.index
-            );
-            self.write_history_node(db, index, node.clone());
-        }
     }
 
     /// Removes all history nodes from the database.

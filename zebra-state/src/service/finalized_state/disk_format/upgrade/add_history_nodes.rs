@@ -74,7 +74,9 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         // Iterate over all network upgrades with history nodes
         for (upgrade, activation_height_option) in upgrades_with_history.iter() {
-            info!("Fetching history nodes for {}", upgrade);
+            info!("Generating history nodes for {}", upgrade);
+
+            // Return early if the upgrade is cancelled.
             if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                 return Err(CancelFormatChange);
             }
@@ -102,13 +104,14 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 .unwrap_or(initial_tip_height)
                 .min(initial_tip_height);
 
-            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                return Err(CancelFormatChange);
-            }
-
             let mut batch = DiskWriteBatch::new();
             let mut index = 0u32;
             for h in activation_height.as_usize()..=last_block_height.as_usize() {
+                // Return early if the upgrade is cancelled.
+                if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+                    return Err(CancelFormatChange);
+                }
+
                 let block = zebra_db
                     .block(HashOrHeight::Height(
                         Height::try_from(h as u32).expect("the value was already a valid height"),
@@ -146,12 +149,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                     }
                 };
 
-                // info!("Adding {} history nodes for block {}", nodes.iter().count(), h);
-
-                // batch.append_history_nodes(zebra_db, nodes, *upgrade);
-
                 nodes.iter().for_each(|node| {
-                    // info!("Writing {:?} history node {}", upgrade, index);
                     batch.write_history_node(
                         zebra_db,
                         HistoryNodeIndex {
@@ -162,10 +160,6 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                     );
                     index += 1;
                 });
-
-                if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
-                }
             }
 
             info!("Adding {} history nodes for upgrade {:?}", index, upgrade);
@@ -180,22 +174,31 @@ impl DiskFormatUpgrade for AddHistoryNodes {
     #[allow(clippy::unwrap_in_result)]
     fn validate(
         &self,
-        initial_tip_height: Option<Height>,
         zebra_db: &ZebraDb,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {
-        info!("Checking history node db upgrade");
-
-        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-            return Err(CancelFormatChange);
-        }
+        info!("Checking history nodes database upgrade");
 
         let network = zebra_db.network().clone();
         let upgrades_with_history = upgrades_with_history(network.clone());
-        let height = initial_tip_height.expect("Initial tip height must be provided");
+
+        let tip_height_option = zebra_db.finalized_tip_height();
+        if tip_height_option.is_none() {
+            if zebra_db.last_history_node_index().is_some() {
+                return Ok(Err(
+                    "History nodes must not exist if there is no finalized block".to_owned(),
+                ));
+            } else {
+                // There is nothing to do
+                return Ok(Ok(()));
+            }
+        }
+
+        let height = tip_height_option.expect("Tip height must exist here");
 
         // Iterate over all network upgrades with history nodes
         for (upgrade, activation_height_option) in upgrades_with_history.iter() {
+            // Return early if the upgrade is cancelled.
             if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                 return Err(CancelFormatChange);
             }
@@ -221,11 +224,12 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 .unwrap_or(height)
                 .min(height);
 
-            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                return Err(CancelFormatChange);
-            }
-
             for h in activation_height.as_usize()..=last_block_height.as_usize() {
+                // Return early if the upgrade is cancelled.
+                if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+                    return Err(CancelFormatChange);
+                }
+
                 let block = zebra_db
                     .block(HashOrHeight::Height(
                         Height::try_from(h as u32).expect("the value was already a valid height"),
@@ -262,63 +266,49 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                     }
                 };
 
-                if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
+                // Clone the inner tree and get the peaks at this height
+                let history_tree = HistoryTree::from(inner_tree.clone());
+                let current_peak_ids = history_tree
+                    .peaks_at(height)
+                    .expect("peaks should exist if height is equal or greater than activation");
+
+                let peaks = current_peak_ids
+                    .iter()
+                    .map(|id| {
+                        (
+                            *id,
+                            zebra_db
+                                .history_node(HistoryNodeIndex {
+                                    upgrade: *upgrade,
+                                    index: *id,
+                                })
+                                .expect("history node should exist"),
+                        )
+                    })
+                    .collect::<BTreeMap<_, _>>();
+
+                // Build a new history tree with the peak nodes read from the database
+                let size = <Option<NonEmptyHistoryTree> as Clone>::clone(&history_tree)
+                    .unwrap()
+                    .size();
+                let new_tree = HistoryTree::from(
+                    NonEmptyHistoryTree::from_cache(&network, size, peaks, height)
+                        .expect("history tree should be valid"),
+                );
+
+                // Compare the hashes
+                let expected_hash = history_tree.hash().expect("tree is not empty");
+                let new_hash = new_tree.hash().expect("tree is not empty");
+                if expected_hash != new_hash {
+                    return Ok(Err(format!(
+                        "History tree hash mismatch for {} with last block at height {:?}",
+                        upgrade, height
+                    )
+                    .to_string()));
                 }
             }
 
-            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                return Err(CancelFormatChange);
-            }
-
-            let history_tree = HistoryTree::from(inner_tree);
-            let peaks_idx = history_tree
-                .peaks_at(last_block_height)
-                .expect("current height should be valid");
-
-            info!(
-                "Reading peaks at block {:?}: {:?}",
-                last_block_height, peaks_idx
-            );
-
-            let peaks = peaks_idx
-                .iter()
-                .map(|idx| {
-                    (
-                        *idx,
-                        zebra_db
-                            .history_node(HistoryNodeIndex {
-                                upgrade: *upgrade,
-                                index: *idx,
-                            })
-                            .expect("history node should exist"),
-                    )
-                })
-                .collect::<BTreeMap<_, _>>();
-
-            // Build a new history tree from the nodes
-            let size = <Option<NonEmptyHistoryTree> as Clone>::clone(&history_tree)
-                .unwrap()
-                .size();
-            let new_tree = HistoryTree::from(
-                NonEmptyHistoryTree::from_cache(&network, size, peaks, last_block_height)
-                    .expect("history tree should be valid"),
-            );
-
-            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                return Err(CancelFormatChange);
-            }
-
-            // Compare the hashes
-            let old_hash = history_tree.hash().expect("tree is not empty");
-            let new_hash = new_tree.hash().expect("tree is not empty");
-            info!("Expected tree root hash: {:x?}", old_hash);
-            info!("Calculated tree root hash: {:x?}", new_hash);
-            if old_hash != new_hash {
-                return Ok(Err(
-                    format!("History tree hash mismatch for {}", upgrade).to_string()
-                ));
-            }
+            info!("Verified history nodes for {}", upgrade);
         }
 
         Ok(Ok(()))

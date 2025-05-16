@@ -13,6 +13,7 @@ use zebra_chain::{
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::NetworkUpgrade,
+    primitives::zcash_history::Entry,
     sapling,
     serialization::SerializationError,
     sprout,
@@ -325,6 +326,8 @@ pub struct Treestate {
     pub note_commitment_trees: NoteCommitmentTrees,
     /// History tree.
     pub history_tree: Arc<HistoryTree>,
+    /// New history nodes added by this block.
+    pub new_history_nodes: Option<Vec<Entry>>,
 }
 
 impl Treestate {
@@ -335,6 +338,7 @@ impl Treestate {
         sapling_subtree: Option<NoteCommitmentSubtree<sapling::tree::Node>>,
         orchard_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
         history_tree: Arc<HistoryTree>,
+        new_history_nodes: Option<Vec<Entry>>,
     ) -> Self {
         Self {
             note_commitment_trees: NoteCommitmentTrees {
@@ -345,6 +349,7 @@ impl Treestate {
                 orchard_subtree,
             },
             history_tree,
+            new_history_nodes,
         }
     }
 }
