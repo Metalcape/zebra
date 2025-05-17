@@ -1,16 +1,16 @@
 //! Handle adding history nodes for the latest network upgrade to the database.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crossbeam_channel::{Receiver, TryRecvError};
 
 use semver::Version;
 
 use zebra_chain::{
-    block::Height,
+    block::{Block, ChainHistoryBlockTxAuthCommitmentHash, Commitment, Height},
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::{Network, NetworkUpgrade},
-    primitives::zcash_history::HistoryNodeIndex,
+    primitives::zcash_history::{Entry, HistoryNodeIndex},
 };
 
 use crate::{service::finalized_state::ZebraDb, HashOrHeight};
@@ -70,7 +70,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
         }
 
         let network = zebra_db.network().clone();
-        let upgrades_with_history = upgrades_with_history(network.clone());
+        let upgrades_with_history = upgrades_with_history(&network);
 
         // Iterate over all network upgrades with history nodes
         for (upgrade, activation_height_option) in upgrades_with_history.iter() {
@@ -180,7 +180,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
         info!("Checking history nodes database upgrade");
 
         let network = zebra_db.network().clone();
-        let upgrades_with_history = upgrades_with_history(network.clone());
+        let upgrades_with_history = upgrades_with_history(&network);
 
         let tip_height_option = zebra_db.finalized_tip_height();
         if tip_height_option.is_none() {
@@ -196,7 +196,9 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         let height = tip_height_option.expect("Tip height must exist here");
 
-        // Iterate over all network upgrades with history nodes
+        // Iterate through all blocks from Heartwood activation up to the chain tip.
+        // For each block, build the history tree from its peaks, and check the hash
+        // against the block header commitment.
         for (upgrade, activation_height_option) in upgrades_with_history.iter() {
             // Return early if the upgrade is cancelled.
             if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
@@ -215,7 +217,25 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 break;
             }
 
-            let mut inner_tree: Option<NonEmptyHistoryTree> = None;
+            let activation_node = zebra_db
+                .history_node(HistoryNodeIndex {
+                    upgrade: *upgrade,
+                    index: 0,
+                })
+                .expect("history node should exist");
+
+            let mut peaks_at_activation = BTreeMap::<u32, Entry>::new();
+            peaks_at_activation.insert(0, activation_node);
+
+            let mut inner_tree: Option<NonEmptyHistoryTree> = Some(
+                NonEmptyHistoryTree::from_cache(
+                    &network,
+                    1,
+                    peaks_at_activation,
+                    activation_height,
+                )
+                .expect("activation height history tree should be valid"),
+            );
 
             let last_block_height = upgrade
                 .next_upgrade()
@@ -224,87 +244,55 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 .unwrap_or(height)
                 .min(height);
 
-            for h in activation_height.as_usize()..=last_block_height.as_usize() {
+            for h in activation_height.as_usize()..last_block_height.as_usize() {
                 // Return early if the upgrade is cancelled.
                 if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                     return Err(CancelFormatChange);
                 }
 
-                let block = zebra_db
+                // Get the next block which contains the tree commitment
+                let next_block = zebra_db
                     .block(HashOrHeight::Height(
-                        Height::try_from(h as u32).expect("the value was already a valid height"),
+                        Height::try_from(1 + h as u32)
+                            .expect("the value was already a valid height"),
                     ))
                     .unwrap();
-                let sapling_root = zebra_db
-                    .sapling_tree_by_height(
-                        &Height::try_from(h as u32).expect("the value was already a valid height"),
-                    )
-                    .unwrap()
-                    .root();
-                let orchard_root = zebra_db
-                    .orchard_tree_by_height(
-                        &Height::try_from(h as u32).expect("the value was already a valid height"),
-                    )
-                    .unwrap()
-                    .root();
-                match inner_tree {
-                    Some(ref mut t) => {
-                        t.push(block, &sapling_root, &orchard_root).expect(
-                            "pushing already finalized block into new history tree should succeed",
-                        );
+
+                // Update the inner tree with the new peaks after activation
+                if height > activation_height {
+                    inner_tree =
+                        update_inner_tree(zebra_db, inner_tree, &network, *upgrade, height);
+                }
+
+                // Compare hashes and return an error if they do not match
+                let new_tree = HistoryTree::from(inner_tree.clone());
+                if let Err(e) =
+                    compare_hashes(&network, *upgrade, height, new_tree.into(), next_block)
+                {
+                    return Ok(Err(e));
+                }
+            }
+
+            // Compare the next upgrade's activation block commitment with the full history tree root hash of this upgrade
+            if let Some(next_upgrade) = upgrade.next_upgrade() {
+                let activation_height = next_upgrade
+                    .activation_height(&network)
+                    .expect("activation height should exist");
+                inner_tree =
+                    update_inner_tree(zebra_db, inner_tree, &network, *upgrade, activation_height);
+                let history_tree = HistoryTree::from(inner_tree);
+                if let Some(activation_block) =
+                    zebra_db.block(HashOrHeight::Height(activation_height))
+                {
+                    if let Err(e) = compare_hashes(
+                        &network,
+                        *upgrade,
+                        height,
+                        history_tree.into(),
+                        activation_block,
+                    ) {
+                        return Ok(Err(e));
                     }
-                    None => {
-                        inner_tree = Some(
-                            NonEmptyHistoryTree::from_block(
-                                &network,
-                                block,
-                                &sapling_root,
-                                &orchard_root,
-                            )
-                            .expect("history tree should exist post-Heartwood"),
-                        );
-                    }
-                };
-
-                // Clone the inner tree and get the peaks at this height
-                let history_tree = HistoryTree::from(inner_tree.clone());
-                let current_peak_ids = history_tree
-                    .peaks_at(height)
-                    .expect("peaks should exist if height is equal or greater than activation");
-
-                let peaks = current_peak_ids
-                    .iter()
-                    .map(|id| {
-                        (
-                            *id,
-                            zebra_db
-                                .history_node(HistoryNodeIndex {
-                                    upgrade: *upgrade,
-                                    index: *id,
-                                })
-                                .expect("history node should exist"),
-                        )
-                    })
-                    .collect::<BTreeMap<_, _>>();
-
-                // Build a new history tree with the peak nodes read from the database
-                let size = <Option<NonEmptyHistoryTree> as Clone>::clone(&history_tree)
-                    .unwrap()
-                    .size();
-                let new_tree = HistoryTree::from(
-                    NonEmptyHistoryTree::from_cache(&network, size, peaks, height)
-                        .expect("history tree should be valid"),
-                );
-
-                // Compare the hashes
-                let expected_hash = history_tree.hash().expect("tree is not empty");
-                let new_hash = new_tree.hash().expect("tree is not empty");
-                if expected_hash != new_hash {
-                    return Ok(Err(format!(
-                        "History tree hash mismatch for {} with last block at height {:?}",
-                        upgrade, height
-                    )
-                    .to_string()));
                 }
             }
 
@@ -315,23 +303,117 @@ impl DiskFormatUpgrade for AddHistoryNodes {
     }
 }
 
-fn upgrades_with_history(network: Network) -> [(NetworkUpgrade, Option<Height>); 4] {
+fn upgrades_with_history(network: &Network) -> [(NetworkUpgrade, Option<Height>); 4] {
     [
         (
             NetworkUpgrade::Heartwood,
-            NetworkUpgrade::activation_height(&NetworkUpgrade::Heartwood, &network),
+            NetworkUpgrade::activation_height(&NetworkUpgrade::Heartwood, network),
         ),
         (
             NetworkUpgrade::Canopy,
-            NetworkUpgrade::activation_height(&NetworkUpgrade::Canopy, &network),
+            NetworkUpgrade::activation_height(&NetworkUpgrade::Canopy, network),
         ),
         (
             NetworkUpgrade::Nu5,
-            NetworkUpgrade::activation_height(&NetworkUpgrade::Nu5, &network),
+            NetworkUpgrade::activation_height(&NetworkUpgrade::Nu5, network),
         ),
         (
             NetworkUpgrade::Nu6,
-            NetworkUpgrade::activation_height(&NetworkUpgrade::Nu6, &network),
+            NetworkUpgrade::activation_height(&NetworkUpgrade::Nu6, network),
         ),
     ]
+}
+
+fn update_inner_tree(
+    zebra_db: &ZebraDb,
+    tree: Option<NonEmptyHistoryTree>,
+    network: &Network,
+    upgrade: NetworkUpgrade,
+    height: Height,
+) -> Option<NonEmptyHistoryTree> {
+    let history_tree = HistoryTree::from(tree);
+    let current_peak_ids = history_tree
+        .peaks_at(height)
+        .expect("peaks should exist if height is equal or greater than activation");
+
+    let peaks = current_peak_ids
+        .iter()
+        .map(|id| {
+            (
+                *id,
+                zebra_db
+                    .history_node(HistoryNodeIndex {
+                        upgrade,
+                        index: *id,
+                    })
+                    .expect("history node should exist"),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let size = history_tree
+        .node_count_at(height)
+        .expect("height is greater than activation height");
+
+    Some(
+        NonEmptyHistoryTree::from_cache(network, size, peaks, height)
+            .expect("history tree should be valid"),
+    )
+}
+
+fn get_hashes(
+    network: &Network,
+    history_tree: Arc<HistoryTree>,
+    block: Arc<Block>,
+) -> Result<([u8; 32], [u8; 32]), String> {
+    let block_commitment = block
+        .commitment(network)
+        .expect("block commitment should exist");
+    match block_commitment {
+        Commitment::ChainHistoryRoot(root_hash) => Ok((
+            root_hash.bytes_in_display_order(),
+            history_tree
+                .hash()
+                .expect("tree is not empty")
+                .bytes_in_display_order(),
+        )),
+        Commitment::ChainHistoryBlockTxAuthCommitment(commitment) => {
+            let auth_data_root = block.auth_data_root();
+            let tree_hash = history_tree.hash().expect("tree is not empty");
+            let new_commitment = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                &tree_hash,
+                &auth_data_root,
+            );
+
+            Ok((
+                commitment.bytes_in_display_order(),
+                new_commitment.bytes_in_display_order(),
+            ))
+        }
+        _ => Err("Unexpected commitment type".to_owned()),
+    }
+}
+
+fn compare_hashes(
+    network: &Network,
+    upgrade: NetworkUpgrade,
+    height: Height,
+    history_tree: Arc<HistoryTree>,
+    block: Arc<Block>,
+) -> Result<(), String> {
+    match get_hashes(network, history_tree, block) {
+        Ok((expected_hash, new_hash)) => {
+            // Compare the hashes
+            if expected_hash != new_hash {
+                Err(format!(
+                    "History tree hash mismatch for {} with last block at height {:?}\nExpected: {:?}\nCalculated: {:?}",
+                    upgrade, height, expected_hash, new_hash
+                )
+                .to_string())
+            } else {
+                Ok(())
+            }
+        }
+        Err(e) => Err(e),
+    }
 }
