@@ -55,6 +55,9 @@ impl DiskFormatUpgrade for AddHistoryNodes {
     ) -> Result<(), CancelFormatChange> {
         info!("Running history node db upgrade");
 
+        // Experiment
+        let mut block_count = 0u32;
+
         // Clear current data if it exists
         let mut batch_for_delete = DiskWriteBatch::new();
         batch_for_delete.clear_history_nodes(zebra_db);
@@ -160,6 +163,15 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                     );
                     index += 1;
                 });
+
+                // Experiment
+                block_count += 1;
+                if block_count % 500_000u32 == 0 {
+                    info!(
+                        "History nodes db update: reached {} blocks milestone",
+                        block_count
+                    );
+                }
             }
 
             info!("Adding {} history nodes for upgrade {:?}", index, upgrade);
@@ -167,6 +179,12 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 .write_batch(batch)
                 .expect("unexpected database write failure");
         }
+
+        // Experiment
+        info!(
+            "History nodes db update: upgrade finished at {} blocks",
+            block_count
+        );
 
         Ok(())
     }
