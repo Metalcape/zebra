@@ -10,7 +10,7 @@ use zebra_chain::{
     block::{Block, ChainHistoryBlockTxAuthCommitmentHash, Commitment, Height},
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::{Network, NetworkUpgrade},
-    primitives::zcash_history::{Entry, HistoryNodeIndex},
+    primitives::zcash_history::HistoryNodeIndex,
 };
 
 use crate::{service::finalized_state::ZebraDb, HashOrHeight};
@@ -224,8 +224,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 })
                 .expect("history node should exist");
 
-            let mut peaks_at_activation = BTreeMap::<u32, Entry>::new();
-            peaks_at_activation.insert(0, activation_node);
+            let peaks_at_activation = BTreeMap::from([(0, activation_node)]);
 
             let mut inner_tree: Option<NonEmptyHistoryTree> = Some(
                 NonEmptyHistoryTree::from_cache(
@@ -259,37 +258,51 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                     .unwrap();
 
                 // Update the inner tree with the new peaks after activation
-                if height > activation_height {
-                    inner_tree =
-                        update_inner_tree(zebra_db, inner_tree, &network, *upgrade, height);
+                if h > activation_height.as_usize() {
+                    inner_tree = update_inner_tree(
+                        zebra_db,
+                        inner_tree,
+                        &network,
+                        *upgrade,
+                        Height(h as u32),
+                    );
                 }
 
                 // Compare hashes and return an error if they do not match
                 let new_tree = HistoryTree::from(inner_tree.clone());
-                if let Err(e) =
-                    compare_hashes(&network, *upgrade, height, new_tree.into(), next_block)
-                {
+                if let Err(e) = compare_hashes(
+                    &network,
+                    *upgrade,
+                    Height(h as u32),
+                    new_tree.into(),
+                    next_block,
+                ) {
                     return Ok(Err(e));
                 }
             }
 
-            // Compare the next upgrade's activation block commitment with the full history tree root hash of this upgrade
-            if let Some(next_upgrade) = upgrade.next_upgrade() {
-                let activation_height = next_upgrade
-                    .activation_height(&network)
-                    .expect("activation height should exist");
+            // Compare the next upgrade's activation block commitment with the full
+            // history tree root hash of this upgrade. This can only be done if
+            // the next network upgrade exists, its height is known and the activation
+            // block is available.
+            if let Some(next_activation_height) = upgrade
+                .next_upgrade()
+                .and_then(|upgrade| upgrade.activation_height(&network))
+            {
                 inner_tree =
-                    update_inner_tree(zebra_db, inner_tree, &network, *upgrade, activation_height);
+                    update_inner_tree(zebra_db, inner_tree, &network, *upgrade, last_block_height);
                 let history_tree = HistoryTree::from(inner_tree);
-                if let Some(activation_block) =
-                    zebra_db.block(HashOrHeight::Height(activation_height))
+                if let Some(next_activation_block) =
+                    zebra_db.block(HashOrHeight::Height(next_activation_height))
                 {
                     if let Err(e) = compare_hashes(
                         &network,
-                        *upgrade,
-                        height,
+                        upgrade
+                            .next_upgrade()
+                            .expect("next upgrade must exist here"),
+                        next_activation_height,
                         history_tree.into(),
-                        activation_block,
+                        next_activation_block,
                     ) {
                         return Ok(Err(e));
                     }
