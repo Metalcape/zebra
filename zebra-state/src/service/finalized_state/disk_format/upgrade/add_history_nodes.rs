@@ -55,9 +55,6 @@ impl DiskFormatUpgrade for AddHistoryNodes {
     ) -> Result<(), CancelFormatChange> {
         info!("Running history node db upgrade");
 
-        // Experiment
-        let mut block_count = 0u32;
-
         // Clear current data if it exists
         let mut batch_for_delete = DiskWriteBatch::new();
         batch_for_delete.clear_history_nodes(zebra_db);
@@ -74,6 +71,10 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         let network = zebra_db.network().clone();
         let upgrades_with_history = upgrades_with_history(&network);
+
+        // Experiment
+        let mut block_count = 0u32;
+        let start_height = upgrades_with_history[0].1.unwrap();
 
         // Iterate over all network upgrades with history nodes
         for (upgrade, activation_height_option) in upgrades_with_history.iter() {
@@ -168,8 +169,9 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 block_count += 1;
                 if block_count % 500_000u32 == 0 {
                     info!(
-                        "History nodes db update: reached {} blocks milestone",
-                        block_count
+                        "History nodes db update (run): reached {} blocks milestone at height {}",
+                        block_count,
+                        start_height.as_usize() as u32 + block_count
                     );
                 }
             }
@@ -182,8 +184,9 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         // Experiment
         info!(
-            "History nodes db update: upgrade finished at {} blocks",
-            block_count
+            "History nodes db update: upgrade finished at height {} ({} blocks processed)",
+            start_height.as_usize() as u32 + block_count,
+            block_count,
         );
 
         Ok(())
@@ -199,6 +202,10 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         let network = zebra_db.network().clone();
         let upgrades_with_history = upgrades_with_history(&network);
+
+        // Experiment
+        let mut block_count = 0u32;
+        let start_height = upgrades_with_history[0].1.unwrap();
 
         let tip_height_option = zebra_db.finalized_tip_height();
         if tip_height_option.is_none() {
@@ -297,6 +304,16 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 ) {
                     return Ok(Err(e));
                 }
+
+                // Experiment
+                block_count += 1;
+                if block_count % 500_000u32 == 0 {
+                    info!(
+                        "History nodes db update (verify): reached {} blocks milestone at height {}",
+                        block_count,
+                        start_height.as_usize() as u32 + block_count
+                    );
+                }
             }
 
             // Compare the next upgrade's activation block commitment with the full
@@ -323,12 +340,29 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                         next_activation_block,
                     ) {
                         return Ok(Err(e));
+                    } else {
+                        // Experiment
+                        block_count += 1;
+                        if block_count % 500_000u32 == 0 {
+                            info!(
+                                "History nodes db update (verify): reached {} blocks milestone at height {}",
+                                block_count,
+                                start_height.as_usize() as u32 + block_count
+                            );
+                        }
                     }
                 }
             }
 
             info!("Verified history nodes for {}", upgrade);
         }
+
+        // Experiment
+        info!(
+            "History nodes db update: verification finished at height {} ({} blocks processed)",
+            start_height.as_usize() as u32 + block_count,
+            block_count,
+        );
 
         Ok(Ok(()))
     }
