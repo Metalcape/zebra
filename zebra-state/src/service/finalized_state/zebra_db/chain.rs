@@ -19,9 +19,11 @@ use std::{
 use zebra_chain::{
     amount::NonNegative,
     block::Height,
+    block_info::BlockInfo,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::NetworkUpgrade,
     primitives::zcash_history::{Entry, HistoryNodeIndex},
+    serialization::ZcashSerialize as _,
     transparent,
     value_balance::ValueBalance,
 };
@@ -67,7 +69,7 @@ pub const HISTORY_NODE: &str = "history_node";
 /// column family.
 pub type HistoryNodeCf<'cf> = TypedColumnFamily<'cf, HistoryNodeIndex, Entry>;
 
-/// The name of the chain value pools column family.
+/// The name of the tip-only chain value pools column family.
 ///
 /// This constant should be used so the compiler can detect typos.
 pub const CHAIN_VALUE_POOLS: &str = "tip_chain_value_pool";
@@ -77,6 +79,17 @@ pub const CHAIN_VALUE_POOLS: &str = "tip_chain_value_pool";
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
 /// column family.
 pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, (), ValueBalance<NonNegative>>;
+
+/// The name of the block info column family.
+///
+/// This constant should be used so the compiler can detect typos.
+pub const BLOCK_INFO: &str = "block_info";
+
+/// The type for reading value pools from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type BlockInfoCf<'cf> = TypedColumnFamily<'cf, Height, BlockInfo>;
 
 impl ZebraDb {
     // Column family convenience methods
@@ -109,6 +122,12 @@ impl ZebraDb {
     /// Returns a typed handle to the chain value pools column family.
     pub(crate) fn chain_value_pools_cf(&self) -> ChainValuePoolsCf {
         ChainValuePoolsCf::new(&self.db, CHAIN_VALUE_POOLS)
+            .expect("column family was created when database was created")
+    }
+
+    /// Returns a typed handle to the block data column family.
+    pub(crate) fn block_info_cf(&self) -> BlockInfoCf {
+        BlockInfoCf::new(&self.db, BLOCK_INFO)
             .expect("column family was created when database was created")
     }
 
@@ -250,6 +269,15 @@ impl ZebraDb {
             .zs_get(&())
             .unwrap_or_else(ValueBalance::zero)
     }
+
+    /// Returns the stored `BlockInfo` for the given block.
+    pub fn block_info(&self, hash_or_height: HashOrHeight) -> Option<BlockInfo> {
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+
+        let block_info_cf = self.block_info_cf();
+
+        block_info_cf.zs_get(&height)
+    }
 }
 
 impl DiskWriteBatch {
@@ -341,18 +369,26 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
+        let new_value_pool = value_pool.add_chain_value_pool_change(
+            finalized
+                .block
+                .chain_value_pool_change(&utxos_spent_by_block, finalized.deferred_balance)?,
+        )?;
         let _ = db
             .chain_value_pools_cf()
             .with_batch_for_writing(self)
-            .zs_insert(
-                &(),
-                &value_pool.add_chain_value_pool_change(
-                    finalized.block.chain_value_pool_change(
-                        &utxos_spent_by_block,
-                        finalized.deferred_balance,
-                    )?,
-                )?,
-            );
+            .zs_insert(&(), &new_value_pool);
+
+        // Get the block size to store with the BlockInfo. This is a bit wasteful
+        // since the block header and txs were serialized previously when writing
+        // them to the DB, and we could get the size if we modified the database
+        // code to return the size of data written; but serialization should be cheap.
+        let block_size = finalized.block.zcash_serialized_size();
+
+        let _ = db.block_info_cf().with_batch_for_writing(self).zs_insert(
+            &finalized.height,
+            &BlockInfo::new(new_value_pool, block_size as u32),
+        );
 
         Ok(())
     }
