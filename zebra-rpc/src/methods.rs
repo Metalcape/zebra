@@ -1561,7 +1561,8 @@ where
             let chain_history_root = match commitment {
                 Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
                 Commitment::ChainHistoryBlockTxAuthCommitment(_) => {
-                    let zebra_state::ReadResponse::HistoryTree(history_tree) = state
+                    let zebra_state::ReadResponse::HistoryTree(history_tree) = self
+                        .read_state
                         .clone()
                         .oneshot(zebra_state::ReadRequest::HistoryTree(height))
                         .await
@@ -2116,7 +2117,6 @@ where
         ];
 
         let network = self.network.clone();
-        let state = self.state.clone();
         let verbose = verbose.unwrap_or(1);
 
         // Fail if history trees are not active yet.
@@ -2146,7 +2146,8 @@ where
 
         let branch_id = network_upgrade.branch_id().unwrap();
 
-        let zebra_state::ReadResponse::HistoryNode(entry) = state
+        let zebra_state::ReadResponse::HistoryNode(entry) = self
+            .read_state
             .clone()
             .oneshot(zebra_state::ReadRequest::HistoryNode(
                 network_upgrade,
@@ -3726,14 +3727,14 @@ pub struct BlockObject {
     #[getter(copy)]
     final_orchard_root: Option<[u8; 32]>,
 
-        /// The root of the Merkle mountain range history tree of the requested block.
-        #[serde(with = "opthex", rename = "chainhistoryroot")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        chain_history_root: Option<[u8; 32]>,
+    /// The root of the Merkle mountain range history tree of the requested block.
+    #[serde(with = "opthex", rename = "chainhistoryroot")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chain_history_root: Option<[u8; 32]>,
 
-        /// List of transactions in block order, hex-encoded if verbosity=1 or
-        /// as objects if verbosity=2.
-        tx: Vec<GetBlockTransaction>,
+    /// List of transactions in block order, hex-encoded if verbosity=1 or
+    /// as objects if verbosity=2.
+    tx: Vec<GetBlockTransaction>,
 
     /// The height of the requested block.
     #[serde(skip_serializing_if = "Option::is_none")]

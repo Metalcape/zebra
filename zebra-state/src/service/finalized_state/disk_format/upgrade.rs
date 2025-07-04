@@ -104,7 +104,7 @@ fn format_upgrades(
         )),
         Box::new(block_info_and_address_received::Upgrade),
         Box::new(add_history_nodes::AddHistoryNodes::new(27, 1, 0)),
-    ] as [Box<dyn DiskFormatUpgrade>; 5])
+    ] as [Box<dyn DiskFormatUpgrade>; 6])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

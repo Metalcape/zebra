@@ -120,7 +120,7 @@ async fn get_block_data(
     height: usize,
     prev_block_info: Option<BlockInfo>,
 ) -> (
-    [u8; 32], 
+    [u8; 32],
     [u8; 32],
     [u8; 32],
     [u8; 32],
@@ -997,7 +997,7 @@ async fn rpc_getblockheader() {
             Commitment::ChainHistoryRoot(_) => expected_chain_history_root,
             Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order(),
         };
-        
+
         let expected_result = GetBlockHeaderResponse::Object(Box::new(BlockHeaderObject {
             hash,
             confirmations: 11 - i as i64,

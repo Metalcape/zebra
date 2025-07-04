@@ -17,11 +17,15 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, block_info::BlockInfo,
-    serialization::ZcashSerialize as _, transparent, value_balance::ValueBalance,
+    amount::NonNegative,
+    block::Height,
+    block_info::BlockInfo,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::NetworkUpgrade,
     primitives::zcash_history::{Entry, HistoryNodeIndex},
+    serialization::ZcashSerialize as _,
+    transparent,
+    value_balance::ValueBalance,
 };
 
 use crate::{
@@ -53,17 +57,6 @@ pub type LegacyHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, Height, HistoryT
 /// A generic raw key type for reading history trees from the database, regardless of the database version.
 /// This type should not be used in new code.
 pub type RawHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, RawBytes, HistoryTreeParts>;
-
-/// The name of the history node column family.
-///
-/// This constant should be used so the compiler can detect typos.
-pub const HISTORY_NODE: &str = "history_node";
-
-/// The type for reading history nodes from the database.
-///
-/// This constant should be used so the compiler can detect incorrectly typed accesses to the
-/// column family.
-pub type HistoryNodeCf<'cf> = TypedColumnFamily<'cf, HistoryNodeIndex, Entry>;
 
 /// The name of the history node column family.
 ///
