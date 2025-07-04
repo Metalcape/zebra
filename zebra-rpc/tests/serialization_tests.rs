@@ -208,6 +208,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let block_commitments = block.block_commitments();
     let final_sapling_root = block.final_sapling_root();
     let final_orchard_root = block.final_orchard_root();
+    let chain_history_root = block.chain_history_root();
     let tx = block
         .tx()
         .iter()
@@ -255,6 +256,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         block_commitments,
         final_sapling_root,
         final_orchard_root,
+        chain_history_root.clone(),
         tx.iter()
             .map(|h| GetBlockTransaction::Hash(zebra_chain::transaction::Hash(*h)))
             .collect(),
@@ -297,6 +299,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     let block_commitments = block.block_commitments();
     let final_sapling_root = block.final_sapling_root();
     let final_orchard_root = block.final_orchard_root();
+    let chain_history_root = block.chain_history_root();
     // We don't unpack the transaction object because we test that in the
     // get_raw_transaction test.
     let tx = block
@@ -331,6 +334,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
         block_commitments,
         final_sapling_root,
         final_orchard_root,
+        chain_history_root.clone(),
         tx.iter()
             .cloned()
             .map(GetBlockTransaction::Object)
@@ -388,6 +392,7 @@ fn test_get_block_header() -> Result<(), Box<dyn std::error::Error>> {
     let block_commitments = header.block_commitments();
     let final_sapling_root = header.final_sapling_root();
     let sapling_tree_size = header.sapling_tree_size();
+    let chain_history_root = header.chain_history_root();
     let time = header.time();
     let nonce = header.nonce();
     let solution = header.solution();
@@ -404,6 +409,7 @@ fn test_get_block_header() -> Result<(), Box<dyn std::error::Error>> {
         merkle_root,
         block_commitments,
         final_sapling_root,
+        chain_history_root,
         sapling_tree_size,
         time,
         nonce,

@@ -965,39 +965,6 @@ async fn rpc_getblockheader() {
             Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order(),
         };
 
-        let commitment = block.commitment(&Mainnet).expect(
-            "Unexpected failure while parsing the blockcommitments field in rpc_getblockheader",
-        );
-
-        let expected_chain_history_root = match commitment {
-            Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
-            Commitment::ChainHistoryBlockTxAuthCommitment(_) => {
-                let zebra_state::ReadResponse::HistoryTree(history_tree) = read_state
-                    .clone()
-                    .oneshot(zebra_state::ReadRequest::HistoryTree(height))
-                    .await
-                    .expect("should have history tree for block height")
-                else {
-                    panic!("unexpected response to HistoryTree request")
-                };
-
-                history_tree
-                    .expect("missing history tree")
-                    .hash()
-                    .expect("history tree was empty")
-                    .bytes_in_display_order()
-            }
-            _ => [0; 32],
-        };
-
-        let expected_block_commitments = match commitment {
-            Commitment::PreSaplingReserved(bytes) => bytes,
-            Commitment::FinalSaplingRoot(_) => expected_final_sapling_root,
-            Commitment::ChainHistoryActivationReserved => expected_chain_history_root,
-            Commitment::ChainHistoryRoot(_) => expected_chain_history_root,
-            Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order(),
-        };
-
         let expected_result = GetBlockHeaderResponse::Object(Box::new(BlockHeaderObject {
             hash,
             confirmations: 11 - i as i64,
