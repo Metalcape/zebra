@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, ChainHistoryMmrRootHash},
+    block_info::BlockInfo,
     history_tree::HistoryTree,
     orchard, sapling,
     serialization::DateTime32,
@@ -31,6 +32,15 @@ pub enum Response {
     /// Response to [`Request::CommitSemanticallyVerifiedBlock`] indicating that a block was
     /// successfully committed to the state.
     Committed(block::Hash),
+
+    /// Response to [`Request::InvalidateBlock`] indicating that a block was found and
+    /// invalidated in the state.
+    Invalidated(block::Hash),
+
+    /// Response to [`Request::ReconsiderBlock`] indicating that a previously invalidated
+    /// block was reconsidered and re-committed to the non-finalized state. Contains a list
+    /// of block hashes that were reconsidered in the state and successfully re-committed.
+    Reconsidered(Vec<block::Hash>),
 
     /// Response to [`Request::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
@@ -165,6 +175,10 @@ pub enum ReadResponse {
         value_balance: ValueBalance<NonNegative>,
     },
 
+    /// Response to [`ReadRequest::BlockInfo`] with
+    /// the block info after the specified block.
+    BlockInfo(Option<BlockInfo>),
+
     /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
 
@@ -245,8 +259,20 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::HistoryNode`] with the specified history tree.
     HistoryNode(Option<zebra_chain::primitives::zcash_history::Entry>),
 
-    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses.
-    AddressBalance(Amount<NonNegative>),
+    /// Response to [`ReadRequest::HistoryTree`] with the specified history tree.
+    HistoryTree(Option<Arc<HistoryTree>>),
+
+    /// Response to [`ReadRequest::HistoryNode`] with the specified history tree.
+    HistoryNode(Option<zebra_chain::primitives::zcash_history::Entry>),
+
+    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses,
+    /// and the total received funds, including change.
+    AddressBalance {
+        /// The total balance of the addresses.
+        balance: Amount<NonNegative>,
+        /// The total received funds in zatoshis, including change.
+        received: u64,
+    },
 
     /// Response to [`ReadRequest::TransactionIdsByAddresses`]
     /// with the obtained transaction ids, in the order they appear in blocks.
@@ -361,6 +387,7 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::UsageInfo(_)
             | ReadResponse::TipPoolValues { .. }
+            | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
@@ -368,7 +395,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardSubtrees(_)
             | ReadResponse::HistoryTree(_)
             | ReadResponse::HistoryNode(_)
-            | ReadResponse::AddressBalance(_)
+            | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_) => {
