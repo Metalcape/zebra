@@ -82,7 +82,7 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 zcash_protocol = { workspace = true }
 zcash_transparent = { workspace = true }
 
-# ECC deps for gethistorynode rpc
+# For the `gethistorynode` RPC method
 zcash_history.workspace = true
 bytemuck = {version = "1.22", features = ["derive"] }
 
