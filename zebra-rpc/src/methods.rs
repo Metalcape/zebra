@@ -4379,6 +4379,7 @@ impl Default for GetHistoryNodeObject {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct GetAuthDataRoot {
     /// Auth data root of the block.
+    #[serde(with = "hex")]
     pub auth_data_root: [u8; 32],
 }
 
