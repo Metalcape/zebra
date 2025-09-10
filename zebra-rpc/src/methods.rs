@@ -401,7 +401,7 @@ pub trait Rpc {
     /// Returns the node of the history tree for the given network upgrade at the specified index.
     ///
     /// method: post
-    /// tags: address
+    /// tags: blockchain
     ///
     /// # Parameters
     ///
@@ -416,6 +416,28 @@ pub trait Rpc {
         index: u32,
         verbose: Option<u8>,
     ) -> Result<GetHistoryNode>;
+
+    /// Returns the auth data root field of the block with the provided hash or height.
+    ///
+    /// method: post
+    /// tags: blockchain
+    ///
+    ///  # Parameters
+    ///
+    /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
+    #[method(name = "getauthdataroot")]
+    async fn get_auth_data_root(&self, hash_or_height: String) -> Result<GetAuthDataRoot>;
+
+    /// Returns the number of sapling and orchard transactions of the block with the provided hash or height.
+    ///
+    /// method: post
+    /// tags: blockchain
+    ///
+    ///  # Parameters
+    ///
+    /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
+    #[method(name = "getshieldedtxcount")]
+    async fn get_shielded_tx_count(&self, hash_or_height: String) -> Result<GetShieldedTxCount>;
 
     /// Stop the running zebrad process.
     ///
@@ -2239,6 +2261,63 @@ where
             Err(ErrorObject::owned(
                 server::error::LegacyCode::Misc.into(),
                 "The requested history node was not found.",
+                None::<()>,
+            ))
+        }
+    }
+
+    async fn get_auth_data_root(&self, hash_or_height: String) -> Result<GetAuthDataRoot> {
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        let zebra_state::ReadResponse::AuthDataRoot(auth_data_root) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::AuthDataRoot(hash_or_height))
+            .await
+            .map_misc_error()?
+        else {
+            panic!("unexpected response to HistoryNode request")
+        };
+
+        if let Some(auth_data_root) = auth_data_root {
+            Ok(GetAuthDataRoot {
+                auth_data_root: auth_data_root.bytes_in_display_order(),
+            })
+        } else {
+            Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "The requested hash or height does not exist.",
+                None::<()>,
+            ))
+        }
+    }
+
+    async fn get_shielded_tx_count(&self, hash_or_height: String) -> Result<GetShieldedTxCount> {
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        let zebra_state::ReadResponse::ShieldedTxCount(shielded_tx_count) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::ShieldedTxCount(hash_or_height))
+            .await
+            .map_misc_error()?
+        else {
+            panic!("unexpected response to HistoryNode request")
+        };
+
+        if let Some(shielded_tx_count) = shielded_tx_count {
+            Ok(GetShieldedTxCount {
+                sapling_tx_count: shielded_tx_count.0,
+                orchard_tx_count: shielded_tx_count.1,
+            })
+        } else {
+            Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "The requested hash or height does not exist.",
                 None::<()>,
             ))
         }
@@ -4292,6 +4371,26 @@ impl Default for GetHistoryNodeObject {
             orchard_tx: 0,
         }
     }
+}
+
+/// Response to a `getauthdataroot` RPC request.
+///
+/// See the notes for the [`RpcServer::get_auth_data_root`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetAuthDataRoot {
+    /// Auth data root of the block.
+    pub auth_data_root: [u8; 32],
+}
+
+/// Response to a `getshieldedtxcount` RPC request.
+///
+/// See the notes for the [`RpcServer::get_shielded_tx_count`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetShieldedTxCount {
+    /// Number of Sapling transactions.
+    pub sapling_tx_count: u64,
+    /// Number of Orchard transactions.
+    pub orchard_tx_count: u64,
 }
 
 /// Build a valid height range from the given optional start and end numbers.

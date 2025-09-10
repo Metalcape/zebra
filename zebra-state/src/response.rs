@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block, ChainHistoryMmrRootHash},
+    block::{self, merkle::AuthDataRoot, Block, ChainHistoryMmrRootHash},
     block_info::BlockInfo,
     history_tree::HistoryTree,
     orchard,
@@ -364,6 +364,12 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::HistoryNode`] with the specified history tree.
     HistoryNode(Option<zebra_chain::primitives::zcash_history::Entry>),
 
+    /// Response to [`ReadRequest::HistoryNode`] with the specified auth data root.
+    AuthDataRoot(Option<AuthDataRoot>),
+
+    /// Response to [`ReadRequest::HistoryNode`] with the specified number of Sapling and Orchard transactions.
+    ShieldedTxCount(Option<(u64, u64)>),
+
     /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses,
     /// and the total received funds, including change.
     AddressBalance {
@@ -497,6 +503,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardSubtrees(_)
             | ReadResponse::HistoryTree(_)
             | ReadResponse::HistoryNode(_)
+            | ReadResponse::AuthDataRoot(_)
+            | ReadResponse::ShieldedTxCount(_)
             | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)

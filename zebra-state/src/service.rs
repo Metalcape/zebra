@@ -1776,6 +1776,54 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            ReadRequest::AuthDataRoot(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let auth_data_root = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::auth_data_root(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::HistoryNode");
+
+                        Ok(ReadResponse::AuthDataRoot(auth_data_root))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            ReadRequest::ShieldedTxCount(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let shielded_tx_count = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::shielded_tx_count(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::HistoryNode");
+
+                        Ok(ReadResponse::ShieldedTxCount(shielded_tx_count))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             ReadRequest::SaplingSubtrees { start_index, limit } => {
                 let state = self.clone();
 

@@ -1117,7 +1117,7 @@ pub enum ReadRequest {
         limit: Option<NoteCommitmentSubtreeIndex>,
     },
 
-    /// Looks up a history tree either by height.
+    /// Looks up a history tree by height.
     ///
     /// Returns
     ///
@@ -1130,10 +1130,29 @@ pub enum ReadRequest {
     ///
     /// Returns
     ///
-    /// /// * [`ReadResponse::HistoryNode(Some(Entry))`](crate::ReadResponse::HistoryTree)
-    ///  if a history node of the specified index exists for the specified network upgrade.
+    /// * [`ReadResponse::HistoryNode(Some(Entry))`](crate::ReadResponse::HistoryTree)
+    ///   if a history node of the specified index exists for the specified network upgrade.
     /// * [`ReadResponse::HistoryTree(None)`](crate::ReadResponse::HistoryTree) otherwise.
     HistoryNode(NetworkUpgrade, u32),
+
+    /// Looks up a block by either hash or height, and returns its auth data root.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::AuthDataRoot(Some(AuthDataRoot))`](crate::ReadResponse::AuthDataRoot)
+    ///   if the block at the requested hash or height exists.
+    /// * [`ReadResponse::AuthDataRoot(None)`](crate::ReadResponse::AuthDataRoot) otherwise.
+    AuthDataRoot(HashOrHeight),
+
+    /// Looks up a block by either hash or height, and returns
+    /// the number of Sapling and Orchard transactions in that block.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::AuthDataRoot(Some(AuthDataRoot))`](crate::ReadResponse::AuthDataRoot)
+    ///   if the block at the requested hash or height exists.
+    /// * [`ReadResponse::AuthDataRoot(None)`](crate::ReadResponse::AuthDataRoot) otherwise.
+    ShieldedTxCount(HashOrHeight),
 
     /// Looks up the balance of a set of transparent addresses.
     ///
@@ -1250,6 +1269,8 @@ impl ReadRequest {
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
             ReadRequest::HistoryTree(_) => "history_tree",
             ReadRequest::HistoryNode(_, _) => "history_node",
+            ReadRequest::AuthDataRoot(_) => "auth_data_root",
+            ReadRequest::ShieldedTxCount(_) => "shielded_tx_count",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addresses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addresses",
