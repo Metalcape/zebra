@@ -509,9 +509,9 @@ impl HistoryTree {
         Some(self.0.as_ref()?.hash())
     }
 
-    /// Return the index of the leaf node of this tree corresponding to the given block height,
+    /// Return the index of the block at the given height by order of insertion,
     /// or `None` if the height is less than the activation height of this tree.
-    pub fn leaf_index_of_block(&self, height: Height) -> Option<u32> {
+    pub fn insertion_index_of_block(&self, height: Height) -> Option<u32> {
         let diff = height
             - self
                 .0
@@ -529,7 +529,7 @@ impl HistoryTree {
     ///
     /// Returns `None` if the height is less than the activation height of this tree.
     pub fn peaks_at(&self, height: Height) -> Option<Vec<u32>> {
-        let leaf_count = 1 + self.leaf_index_of_block(height)?;
+        let leaf_count = 1 + self.insertion_index_of_block(height)?;
 
         // If bit h of leaf_count is set, there is a peak at height h.
         // Each peak at height h has 2^h leaves and 2^(h+1) - 1 nodes.
