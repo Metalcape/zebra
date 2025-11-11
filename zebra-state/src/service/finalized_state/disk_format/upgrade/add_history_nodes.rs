@@ -70,8 +70,8 @@ impl DiskFormatUpgrade for AddHistoryNodes {
             return Ok(());
         }
 
-        let network = zebra_db.network().clone();
-        let upgrades_with_history = upgrades_with_history(&network);
+        let network = zebra_db.network();
+        let upgrades_with_history = upgrades_with_history(&zebra_db);
 
         // Iterate over all network upgrades with history nodes
         for (upgrade, activation_height_option) in upgrades_with_history.iter() {
@@ -181,7 +181,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
         info!("Checking history nodes database upgrade");
 
         let network = zebra_db.network().clone();
-        let upgrades_with_history = upgrades_with_history(&network);
+        let upgrades_with_history = upgrades_with_history(&zebra_db);
 
         let tip_height_option = zebra_db.finalized_tip_height();
         if tip_height_option.is_none() {
@@ -317,25 +317,20 @@ impl DiskFormatUpgrade for AddHistoryNodes {
     }
 }
 
-fn upgrades_with_history(network: &Network) -> [(NetworkUpgrade, Option<Height>); 4] {
-    [
-        (
-            NetworkUpgrade::Heartwood,
-            NetworkUpgrade::activation_height(&NetworkUpgrade::Heartwood, network),
-        ),
-        (
-            NetworkUpgrade::Canopy,
-            NetworkUpgrade::activation_height(&NetworkUpgrade::Canopy, network),
-        ),
-        (
-            NetworkUpgrade::Nu5,
-            NetworkUpgrade::activation_height(&NetworkUpgrade::Nu5, network),
-        ),
-        (
-            NetworkUpgrade::Nu6,
-            NetworkUpgrade::activation_height(&NetworkUpgrade::Nu6, network),
-        ),
-    ]
+fn upgrades_with_history(db: &ZebraDb) -> Vec<(NetworkUpgrade, Option<Height>)> {
+    let network = db.network();
+    let tip_height = db.finalized_tip_height().expect("The finalized state is not empty");
+    let current_upgrade = NetworkUpgrade::current(&network, tip_height);
+    let history_tree_upgrades: Vec<NetworkUpgrade> = NetworkUpgrade::iter()
+        .skip_while(|u| *u != NetworkUpgrade::Heartwood)
+        .take_while(|u| *u != current_upgrade)
+        .chain(std::iter::once(current_upgrade))
+        .collect();
+
+    history_tree_upgrades.iter()
+        .map(|upgrade| {
+            (*upgrade, upgrade.activation_height(&network))
+        }).collect::<Vec<(_,_)>>()
 }
 
 fn update_inner_tree(
