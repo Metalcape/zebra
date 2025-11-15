@@ -71,7 +71,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
         }
 
         let network = zebra_db.network();
-        let upgrades_with_history = upgrades_with_history(&zebra_db);
+        let upgrades_with_history = upgrades_with_history(zebra_db);
 
         // Iterate over all network upgrades with history nodes
         for (upgrade, activation_height_option) in upgrades_with_history.iter() {
@@ -181,7 +181,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
         info!("Checking history nodes database upgrade");
 
         let network = zebra_db.network().clone();
-        let upgrades_with_history = upgrades_with_history(&zebra_db);
+        let upgrades_with_history = upgrades_with_history(zebra_db);
 
         let tip_height_option = zebra_db.finalized_tip_height();
         if tip_height_option.is_none() {
@@ -319,7 +319,9 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
 fn upgrades_with_history(db: &ZebraDb) -> Vec<(NetworkUpgrade, Option<Height>)> {
     let network = db.network();
-    let tip_height = db.finalized_tip_height().expect("The finalized state is not empty");
+    let tip_height = db
+        .finalized_tip_height()
+        .expect("The finalized state is not empty");
     let current_upgrade = NetworkUpgrade::current(&network, tip_height);
     let history_tree_upgrades: Vec<NetworkUpgrade> = NetworkUpgrade::iter()
         .skip_while(|u| *u != NetworkUpgrade::Heartwood)
@@ -327,10 +329,10 @@ fn upgrades_with_history(db: &ZebraDb) -> Vec<(NetworkUpgrade, Option<Height>)> 
         .chain(std::iter::once(current_upgrade))
         .collect();
 
-    history_tree_upgrades.iter()
-        .map(|upgrade| {
-            (*upgrade, upgrade.activation_height(&network))
-        }).collect::<Vec<(_,_)>>()
+    history_tree_upgrades
+        .iter()
+        .map(|upgrade| (*upgrade, upgrade.activation_height(&network)))
+        .collect::<Vec<(_, _)>>()
 }
 
 fn update_inner_tree(
@@ -341,9 +343,7 @@ fn update_inner_tree(
     height: Height,
 ) -> Option<NonEmptyHistoryTree> {
     let history_tree = HistoryTree::from(tree);
-    let current_peak_ids = history_tree
-        .peaks_at(height)
-        .expect("peaks should exist if height is equal or greater than activation");
+    let current_peak_ids = history_tree.peaks_at(height)?;
 
     let peaks = current_peak_ids
         .iter()
@@ -360,9 +360,7 @@ fn update_inner_tree(
         })
         .collect::<BTreeMap<_, _>>();
 
-    let size = history_tree
-        .node_count_at(height)
-        .expect("height is greater than activation height");
+    let size = history_tree.node_count_at(height)?;
 
     Some(
         NonEmptyHistoryTree::from_cache(network, size, peaks, height)
@@ -375,18 +373,16 @@ fn get_hashes(
     history_tree: Arc<HistoryTree>,
     block: Arc<Block>,
 ) -> Result<([u8; 32], [u8; 32]), String> {
-    let block_commitment = block
-        .commitment(network)
-        .expect("block commitment should exist");
+    let block_commitment = block.commitment(network);
     match block_commitment {
-        Commitment::ChainHistoryRoot(root_hash) => Ok((
+        Ok(Commitment::ChainHistoryRoot(root_hash)) => Ok((
             root_hash.bytes_in_display_order(),
             history_tree
                 .hash()
                 .expect("tree is not empty")
                 .bytes_in_display_order(),
         )),
-        Commitment::ChainHistoryBlockTxAuthCommitment(commitment) => {
+        Ok(Commitment::ChainHistoryBlockTxAuthCommitment(commitment)) => {
             let auth_data_root = block.auth_data_root();
             let tree_hash = history_tree.hash().expect("tree is not empty");
             let new_commitment = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
@@ -415,7 +411,9 @@ fn compare_hashes(
             // Compare the hashes
             if expected_hash != new_hash {
                 Err(format!(
-                    "History tree hash mismatch for {upgrade} with last block at height {height:?}\nExpected: {expected_hash:?}\nCalculated: {new_hash:?}"
+                    "History tree hash mismatch for {upgrade} with last block at height {height:?}\nExpected: {}\nCalculated: {}",
+                    hex::encode(expected_hash),
+                    hex::encode(new_hash),
                 )
                 .to_string())
             } else {

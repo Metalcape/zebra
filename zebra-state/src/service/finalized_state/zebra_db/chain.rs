@@ -350,6 +350,12 @@ impl DiskWriteBatch {
     ///
     /// Should only be used for debug and database upgrade.
     pub fn clear_history_nodes(&mut self, db: &ZebraDb) {
+        let tip = db.finalized_tip_height();
+        if tip.is_none() {
+            return;
+        }
+
+        let current_upgrade = NetworkUpgrade::current(&db.network(), tip.unwrap());
         let history_node_cf = db.history_node_cf().with_batch_for_writing(self);
 
         let from = HistoryNodeIndex {
@@ -357,7 +363,7 @@ impl DiskWriteBatch {
             index: 0,
         };
         let until_strictly_before = HistoryNodeIndex {
-            upgrade: zebra_chain::parameters::NetworkUpgrade::Nu6,
+            upgrade: current_upgrade,
             index: u32::MAX,
         };
         let _ = history_node_cf.zs_delete_range(&from, &until_strictly_before);
