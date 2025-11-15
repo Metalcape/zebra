@@ -251,13 +251,22 @@ impl ZebraDb {
 
         if history_tree_upgrades.contains(&upgrade) {
             // Get the last block height of this upgrade, or the tip height if this is the last upgrade
+            let tip_height = self.finalized_tip_height()?;
             let last_height = upgrade.next_upgrade().map_or_else(
-                || self.finalized_tip_height(),
+                || tip_height,
                 |next| {
-                    next.activation_height(&self.network())
-                        .map_or_else(|| self.finalized_tip_height(), |height| height - 1)
+                    next.activation_height(&self.network()).map_or_else(
+                        || tip_height,
+                        |height| {
+                            if height <= tip_height {
+                                (height - 1).expect("height must be greater than zero")
+                            } else {
+                                tip_height
+                            }
+                        },
+                    )
                 },
-            )?;
+            );
 
             self.history_tree_by_height(last_height)
         } else {
