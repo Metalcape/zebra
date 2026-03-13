@@ -42,8 +42,6 @@ fn push_and_prune_for_network_upgrade(
 
     let height = network_upgrade.activation_height(&network).unwrap().0;
 
-    let expected_nodes = network.mainnet_history_nodes(network_upgrade).unwrap();
-
     // Load first block (activation block of the given network upgrade)
     let first_block = Arc::new(
         blocks
@@ -147,9 +145,6 @@ fn push_and_prune_for_network_upgrade(
     assert_eq!(tree.current_height().0, height + 1);
     // There should be 2 returned nodes (the peak and the new leaf)
     assert_eq!(entries.len(), 2);
-    // The returned nodes should match the expected nodes
-    assert_eq!(entries[0].inner(), expected_nodes[1]);
-    assert_eq!(entries[1].inner(), expected_nodes[2]);
 
     Ok(())
 }
@@ -241,14 +236,12 @@ fn tree_from_cache_for_network_upgrade(
     network: Network,
     network_upgrade: NetworkUpgrade,
 ) -> Result<()> {
-    let is_mainnet = network.is_mainnet();
-    print!("{is_mainnet}, {network_upgrade:?}: ");
     let (blocks, sapling_roots) = network.block_sapling_roots_map();
     let orchard_roots = network.orchard_anchors();
 
     let height = network_upgrade.activation_height(&network).unwrap().0;
 
-    let history_nodes = network.mainnet_history_nodes(network_upgrade).unwrap();
+    let history_nodes = network.mainnet_history_nodes(network_upgrade).unwrap().clone();
     let n_nodes = history_nodes.len();
 
     // We use 6 blocks to build a tree with 10 nodes
@@ -276,7 +269,6 @@ fn tree_from_cache_for_network_upgrade(
             Some(orchard::tree::Root::try_from(root_bytes)?)
         }
     };
-    print!("first orchard OK, ");
     let mut tree_from_blocks = NonEmptyHistoryTree::from_block(
         &network,
         first_block,
@@ -285,6 +277,7 @@ fn tree_from_cache_for_network_upgrade(
     )?;
 
     // Build a tree from blocks
+    let mut entries = Vec::new();
     for i in 1..n_blocks as u32 {
         let next_block = Arc::new(
             blocks
@@ -312,11 +305,15 @@ fn tree_from_cache_for_network_upgrade(
             }
         };
 
-        print!("orchard {i} OK, ");
-
-        tree_from_blocks
+        let mut new_entries = tree_from_blocks
             .push(next_block, &sapling_root, &orchard_root.unwrap_or_default())
             .unwrap();
+        entries.append(&mut new_entries);
+    }
+
+    // The returned entries should match the history node vector
+    for (expected, returned) in history_nodes[1..].iter().zip(entries) {
+        assert_eq!(*expected, returned.inner());
     }
 
     // Build a tree from nodes
@@ -341,6 +338,5 @@ fn tree_from_cache_for_network_upgrade(
     // Compare hashes and see if they match
     assert_eq!(tree_from_blocks.hash(), tree_from_cache.hash());
 
-    println!("OK");
     Ok(())
 }
