@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, ops::RangeBounds};
 use crate::{
     amount::Amount,
     block::Block,
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
     transaction::{UnminedTx, VerifiedUnminedTx},
 };
@@ -16,9 +16,9 @@ use zebra_test::vectors::{
     BLOCK_TESTNET_1116000_BYTES, BLOCK_TESTNET_583999_BYTES, BLOCK_TESTNET_925483_BYTES,
     CONTINUOUS_MAINNET_BLOCKS, CONTINUOUS_TESTNET_BLOCKS, MAINNET_BLOCKS,
     MAINNET_FINAL_ORCHARD_ROOTS, MAINNET_FINAL_SAPLING_ROOTS, MAINNET_FINAL_SPROUT_ROOTS,
-    SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES, SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
-    TESTNET_BLOCKS, TESTNET_FINAL_ORCHARD_ROOTS, TESTNET_FINAL_SAPLING_ROOTS,
-    TESTNET_FINAL_SPROUT_ROOTS,
+    MAINNET_HISTORY_NODES, SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES,
+    SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES, TESTNET_BLOCKS, TESTNET_FINAL_ORCHARD_ROOTS,
+    TESTNET_FINAL_SAPLING_ROOTS, TESTNET_FINAL_SPROUT_ROOTS, TESTNET_HISTORY_NODES,
 };
 
 /// Network methods for fetching blockchain vectors.
@@ -205,6 +205,23 @@ impl Network {
                 &*TESTNET_FINAL_SPROUT_ROOTS,
                 TESTNET_FIRST_JOINSPLIT_HEIGHT,
             )
+        }
+    }
+
+    /// Returns Vec of ordered history nodes for the given network upgrade.
+    ///
+    /// Returns `None` for upgrades other than Heartwood, Canopy and NU5.
+    pub fn mainnet_history_nodes(&self, network_upgrade: NetworkUpgrade) -> Option<&Vec<&[u8]>> {
+        let vector_map = if self.is_mainnet() {
+            &*MAINNET_HISTORY_NODES
+        } else {
+            &*TESTNET_HISTORY_NODES
+        };
+        match network_upgrade {
+            NetworkUpgrade::Heartwood => vector_map.get("heartwood"),
+            NetworkUpgrade::Canopy => vector_map.get("canopy"),
+            NetworkUpgrade::Nu5 => vector_map.get("nu5"),
+            _ => None,
         }
     }
 }
