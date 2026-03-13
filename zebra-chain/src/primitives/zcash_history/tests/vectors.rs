@@ -81,3 +81,34 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
 
     Ok(())
 }
+
+/// Test the conversion of history nodes to and from the byte representation.
+/// 
+/// This only applies to the inner [`zcash_history::NodeData`] and does not include
+/// the [`zcash_history::EntryLink`] because they are contextual to the lower level
+/// tree API and are not used outside of it.
+#[test]
+fn entry_round_trip() -> Result<()> {
+    for network in Network::iter() {
+        entry_round_trip_for_network_upgrade::<V1>(&network, NetworkUpgrade::Heartwood)?;
+        entry_round_trip_for_network_upgrade::<V1>(&network, NetworkUpgrade::Canopy)?;
+        entry_round_trip_for_network_upgrade::<V2>(&network, NetworkUpgrade::Nu5)?;
+    }
+    Ok(())
+}
+
+fn entry_round_trip_for_network_upgrade<V: zcash_history::Version + ExtractNodeData>(network: &Network, network_upgrade: NetworkUpgrade) -> Result<()> {
+    let history_nodes = network.mainnet_history_nodes(network_upgrade).unwrap().clone();
+    let entry = Entry::from(&Vec::from(*history_nodes.first().unwrap()));
+    let node_data = V::node_data_from_entry(network, network_upgrade, &entry);
+    let entry_object = zcash_history::Entry::<V>::new_leaf(node_data);
+    let mut new_entry = Entry {
+        inner: [0; zcash_history::MAX_ENTRY_SIZE],
+    };
+    entry_object
+        .write(&mut &mut new_entry.inner[..])
+        .expect("buffer has the proper size");
+
+    assert_eq!(entry.inner(), new_entry.inner());
+    Ok(())
+}
